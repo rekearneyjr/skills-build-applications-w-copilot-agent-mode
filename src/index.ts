@@ -157,6 +157,8 @@ function validateFilters(filters: string): void {
     /;\s*DROP/i,
     /;\s*DELETE/i,
     /;\s*INSERT/i,
+    // Allow UPDATE TRACKING and UPDATE VIEWSTAT (valid Salesforce SOQL keywords)
+    // but block other UPDATE statements that could modify data
     /;\s*UPDATE(?!\s+(?:TRACKING|VIEWSTAT))/i,
     /--/,
     /\/\*/,
@@ -673,6 +675,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             "customerId is required"
           );
         }
+
+        // Validate Salesforce ID format before using it
+        validateSalesforceId(customerId, "customerId");
 
         const updateData: any = { Id: customerId };
         if (name) updateData.Name = name;
