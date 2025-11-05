@@ -98,6 +98,84 @@ class SalesforceConnection {
   }
 }
 
+// Security: Validate Salesforce ID format (15 or 18 character alphanumeric)
+function validateSalesforceId(id: string, fieldName: string): void {
+  if (!id || typeof id !== "string") {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `${fieldName} must be a non-empty string`
+    );
+  }
+
+  const idRegex = /^[a-zA-Z0-9]{15}$|^[a-zA-Z0-9]{18}$/;
+  if (!idRegex.test(id)) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `${fieldName} must be a valid Salesforce ID (15 or 18 characters)`
+    );
+  }
+}
+
+// Security: Sanitize SOSL search term to prevent injection
+function sanitizeSearchTerm(searchTerm: string): string {
+  if (!searchTerm || typeof searchTerm !== "string") {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      "searchTerm must be a non-empty string"
+    );
+  }
+
+  // Escape special SOSL characters
+  return searchTerm
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/\?/g, "\\?")
+    .replace(/\*/g, "\\*")
+    .replace(/&/g, "\\&")
+    .replace(/\|/g, "\\|")
+    .replace(/!/g, "\\!")
+    .replace(/\{/g, "\\{")
+    .replace(/\}/g, "\\}")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+// Security: Validate SOQL filter string
+function validateFilters(filters: string): void {
+  if (!filters || typeof filters !== "string") {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      "filters must be a non-empty string"
+    );
+  }
+
+  // Check for common SQL injection patterns
+  const dangerousPatterns = [
+    /;\s*DROP/i,
+    /;\s*DELETE/i,
+    /;\s*INSERT/i,
+    /;\s*UPDATE(?!\s+(?:TRACKING|VIEWSTAT))/i,
+    /--/,
+    /\/\*/,
+    /\*\//,
+    /EXEC/i,
+    /EXECUTE/i,
+  ];
+
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(filters)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "filters contain potentially dangerous patterns"
+      );
+    }
+  }
+}
+
+
 // Initialize Salesforce connection
 let sfConnection: SalesforceConnection;
 
@@ -388,6 +466,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           offset?: number;
         };
 
+        // Validate filters if provided
+        if (filters) {
+          validateFilters(filters);
+        }
+
         const whereClause = filters ? `WHERE ${filters}` : "";
         const query = `SELECT Id, Name, Phone, Website, Industry, AnnualRevenue, NumberOfEmployees, BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry, Description, CreatedDate, LastModifiedDate FROM Account ${whereClause} ORDER BY Name LIMIT ${limit} OFFSET ${offset}`;
 
@@ -420,6 +503,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             "customerId is required"
           );
         }
+
+        // Validate Salesforce ID format
+        validateSalesforceId(customerId, "customerId");
 
         const query = `SELECT Id, Name, Phone, Website, Industry, Type, AnnualRevenue, NumberOfEmployees, BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry, ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry, Description, CreatedDate, LastModifiedDate, OwnerId, Owner.Name FROM Account WHERE Id = '${customerId}'`;
 
@@ -455,7 +541,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        const soslQuery = `FIND {${searchTerm}} IN ALL FIELDS RETURNING Account(Id, Name, Phone, Website, Industry, AnnualRevenue, BillingCity, BillingState, BillingCountry) LIMIT ${limit}`;
+        // Sanitize search term to prevent SOSL injection
+        const sanitizedTerm = sanitizeSearchTerm(searchTerm);
+
+        const soslQuery = `FIND {${sanitizedTerm}} IN ALL FIELDS RETURNING Account(Id, Name, Phone, Website, Industry, AnnualRevenue, BillingCity, BillingState, BillingCountry) LIMIT ${limit}`;
 
         const result = await conn.search(soslQuery);
 
@@ -644,6 +733,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
+        // Validate Salesforce ID format
+        validateSalesforceId(customerId, "customerId");
+
         const query = `SELECT Id, FirstName, LastName, Email, Phone, Title, Department, MailingStreet, MailingCity, MailingState, MailingPostalCode, MailingCountry, CreatedDate, LastModifiedDate FROM Contact WHERE AccountId = '${customerId}' ORDER BY LastName, FirstName LIMIT ${limit}`;
 
         const result = await conn.query(query);
@@ -678,6 +770,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
+        // Validate Salesforce ID format
+        validateSalesforceId(customerId, "customerId");
+
         const query = `SELECT Id, Name, StageName, Amount, CloseDate, Probability, Type, LeadSource, Description, CreatedDate, LastModifiedDate, Owner.Name FROM Opportunity WHERE AccountId = '${customerId}' ORDER BY CloseDate DESC LIMIT ${limit}`;
 
         const result = await conn.query(query);
@@ -711,6 +806,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             "customerId is required"
           );
         }
+
+        // Validate Salesforce ID format
+        validateSalesforceId(customerId, "customerId");
 
         const query = `SELECT Id, CaseNumber, Subject, Status, Priority, Origin, Type, Reason, Description, CreatedDate, ClosedDate, LastModifiedDate, Owner.Name FROM Case WHERE AccountId = '${customerId}' ORDER BY CreatedDate DESC LIMIT ${limit}`;
 
